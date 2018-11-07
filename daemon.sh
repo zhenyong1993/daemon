@@ -1,20 +1,24 @@
 #!/bin/bash
 
-# VERSION:  1.1
-# DATE:     2018/11/02
+# VERSION:  1.2
+# UPDATE:   * enclosure directory named 'tp' under /home/$USER
+#           to handle related control mechanism
+#           * fix minor bug
+# DATE:     2018/11/07
 # FUNCTION: monitor process and handle request
 
 # DO NOT EXECUTE THIS FILE MANUALLY
 
 #env ==============================#
-DIR='/home/i5/bin/collector'       #
+COLLECTOR='/home/i5/bin/collector' #
 ADAPTER='/home/i5/bin/adaptive'    #
 AGENTSERVER='/home/i5/bin'         #
 LOGDIR='/home/i5/data/logs/daemon' #
 LOGFILE="$LOGDIR/DM"$$".log"       #
 USER="Jim"                         #
-FIFO="/home/$USER/cmd.fifo"        #
-MONITORCONF="/home/$USER/dmconf"   #
+INFOPATH="/home/$USER/tp"          #
+FIFO="$INFOPATH/cmd.fifo"          #
+MONITORCONF="$INFOPATH/dmconf"     #
 #env ==============================#
 
 #it seems operator & is not supported
@@ -36,10 +40,9 @@ func_lg()
 
 func_collectorStart()
 {
-    #workaround
     #alt2 is to use [ldconfig]
-    cd $DIR
-    $DIR/ibox > /dev/null 2>&1 &
+    cd $COLLECTOR
+    $COLLECTOR/ibox > /dev/null 2>&1 &
     cd -
 }
 func_agentServerStart()
@@ -49,7 +52,6 @@ func_agentServerStart()
 }
 func_adapterStart()
 {
-    #workaround
     #alt2 is to use [ldconfig]
     cd $ADAPTER
     $ADAPTER/self > /dev/null 2>&1 &
@@ -57,7 +59,7 @@ func_adapterStart()
 }
 func_openvpnStart()
 {
-    #TODO: add command
+    #TODO: add command or remove this function
     echo " +_+ fake openvpn start"
 }
 
@@ -82,11 +84,11 @@ func_stop() #stop
         return 0
     fi
     _ARG=$1
-#temp solution for naming issue adapter->adaptive
+#workaround for naming issue adapter->adaptive
     if [ "adapter" == $_ARG ]; then
         _ARG=adaptive
     fi
-#temp solution for naming issue adapter->adaptive
+
     echo "--- `date` ---" >> $LOGFILE
     if [ `ps -ef | grep $_ARG | grep -v grep | wc -l` -eq 0 ]; then # not running
         echo "INFO: $_ARG not running, no need to kill" >> $LOGFILE
@@ -102,19 +104,15 @@ func_start() #start
         return 0
     fi
     _ARG=$1
-#temp solution for naming issue adapter->adaptive
+#workaround for naming issue adapter->adaptive
     if [ "adapter" == $_ARG ]; then
-        if [ `ps -ef | grep adaptive | grep -v grep | wc -l` -ne 0 ]; then # is running, no need to start
-            return 1
-        fi
+        _ARG="adaptive"
     fi
-#temp solution for naming issue adapter->adaptive
+
+#workaround for openvpn
     if [ "openvpn" == $_ARG ]; then
-        if [ `ps -ef | grep vpnlogin_autoconnec | grep -v grep | wc -l` -ne 0 ]; then # is running, no need to start
-            return 1
-        fi
+        _ARG="vpnlogin_autoconnec"
     fi
-#temp solution for openvpn
 
     if [ `ps -ef | grep $_ARG | grep -v grep | wc -l` -ne 0 ]; then # is running, no need to start
         return 1
@@ -129,10 +127,10 @@ func_start() #start
         agentServer)
             func_agentServerStart
             ;;
-    	adapter)
+    	adaptive)
             func_adapterStart
             ;;
-        openvpn)
+        vpnlogin_autoconnec)
             func_openvpnStart
             ;;
         *)
@@ -196,6 +194,7 @@ func_clean()
     rm $FIFO
     rm $MONITORCONF/not.conf
     rmdir $MONITORCONF
+    rmdir $INFOPATH
     exit 1
 }
 #func ==========================
@@ -214,6 +213,11 @@ if [ ! -d $LOGDIR ]; then
 fi
 func_lg
 
+#info directory: place control related file
+if [ ! -d $INFOPATH ]; then
+    su -c "mkdir $INFOPATH" $USER
+fi
+
 #agentServer
 func_start agentServer &
 wait
@@ -229,9 +233,9 @@ wait
 
 #init conf
 if [ ! -d $MONITORCONF ]; then
-    mkdir $MONITORCONF
+    su -c "mkdir $MONITORCONF" $USER
 fi
-echo "210" > $MONITORCONF/not.conf #config file
+echo "210" > $MONITORCONF/not.conf #2*3*5*7
 
 #make fifo, offer permission to user
 if [ -e $FIFO ]; then
@@ -249,6 +253,7 @@ while true; do
     sleep 1
     cmd=$(cat $FIFO)
     confmask=`cat $MONITORCONF/not.conf`
+#    echo "command received: $cmd" >> $LOGFILE
     if [ "ibstart" == $cmd ]; then
         func_start collector
         if [ 0 -ne `expr $confmask % $SIGCO` ]; then #add this mask 2

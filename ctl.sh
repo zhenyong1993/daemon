@@ -11,7 +11,7 @@ if [ $# != 1 ]; then
 fi
 
 #DIR='/home/i5/bin/collector'
-DIR=$HOME
+DIR=$HOME/tp
 
 ff=$DIR/cmd.fifo
 
