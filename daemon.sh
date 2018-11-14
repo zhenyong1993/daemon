@@ -15,7 +15,7 @@ ADAPTER='/home/i5/bin/adaptive'    #
 AGENTSERVER='/home/i5/bin'         #
 LOGDIR='/home/i5/data/logs/daemon' #
 LOGFILE="$LOGDIR/DM"$$".log"       #
-USER="Jim"                         #
+USER="i5"                          #
 INFOPATH="/home/$USER/tp"          #
 FIFO="$INFOPATH/cmd.fifo"          #
 MONITORCONF="$INFOPATH/dmconf"     #
@@ -47,7 +47,6 @@ func_collectorStart()
 }
 func_agentServerStart()
 {
-#   service monexecd start
     $AGENTSERVER/agentServer > /dev/null 2>&1 &
 }
 func_adapterStart()
@@ -59,8 +58,7 @@ func_adapterStart()
 }
 func_openvpnStart()
 {
-    #TODO: add command or remove this function
-    echo " +_+ fake openvpn start"
+    /etc/init.d/openvpn &
 }
 
 func_checkRunning()
@@ -109,11 +107,6 @@ func_start() #start
         _ARG="adaptive"
     fi
 
-#workaround for openvpn
-    if [ "openvpn" == $_ARG ]; then
-        _ARG="vpnlogin_autoconnec"
-    fi
-
     if [ `ps -ef | grep $_ARG | grep -v grep | wc -l` -ne 0 ]; then # is running, no need to start
         return 1
     fi
@@ -130,7 +123,7 @@ func_start() #start
     	adaptive)
             func_adapterStart
             ;;
-        vpnlogin_autoconnec)
+        openvpn)
             func_openvpnStart
             ;;
         *)
@@ -207,6 +200,7 @@ trap func_clean KILL           #
 
 ####################################### start ########################################
 
+rm $LOGDIR/DM*.log
 #log file
 if [ ! -d $LOGDIR ]; then
     mkdir $LOGDIR
