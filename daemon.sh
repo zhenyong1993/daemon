@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# VERSION:  1.2
-# UPDATE:   * enclosure directory named 'tp' under /home/$USER
-#           to handle related control mechanism
-#           * fix minor bug
-# DATE:     2018/11/07
+# VERSION:  1.3.0
+# UPDATE:   * check appType before monitor process
+#               1. base type for agent+update(update is to be provided stakeholder)
+#               2. adaptive type for all
+# DATE:     2018/11/16
 # FUNCTION: monitor process and handle request
 
 # DO NOT EXECUTE THIS FILE MANUALLY
@@ -20,10 +20,12 @@ INFOPATH="/home/$USER/tp"          #
 FIFO="$INFOPATH/cmd.fifo"          #
 MONITORCONF="$INFOPATH/dmconf"     #
 #env ==============================#
+#appTYpe:
+#   base:     agentServer + update
+#   adaptive: agentServer + update + adapter + collector + openvpn
+APPTYPE=base #default
 
-#it seems operator & is not supported
-#by bash, use opeartor % instead to
-#check mask
+#it seems operator & is not supported by bash, use opeartor % instead
 #mask==============================#
 SIGCO=2              #   collector #
 SIGAG=3              # agentServer #
@@ -37,7 +39,10 @@ func_lg()
     echo "--- `date` ---" >> $LOGFILE
     echo "Daemon start" >> $LOGFILE
 }
-
+func_checkStrategy()
+{
+    APPTYPE=`awk '{if($1 == "appType"){print $3}}' /home/i5/bin/config/agentConfig.properties`
+}
 func_collectorStart()
 {
     #alt2 is to use [ldconfig]
@@ -140,7 +145,7 @@ func_start() #start
 
 func_monitor()
 {
-    local LISTENBIT=210  #magic number
+    local LISTENBIT=`cat $MONITORCONF/not.conf` #init
     func_NOTIFY()
     {
         LISTENBIT=`cat $MONITORCONF/not.conf`
@@ -169,7 +174,6 @@ func_monitor()
         sleep 3
     done
 }
-
 func_err()
 {
     echo "--- `date` ---" >> $LOGFILE
@@ -199,100 +203,120 @@ trap func_clean KILL           #
 #trap =========================#
 
 ####################################### start ########################################
-
-rm $LOGDIR/DM*.log
-#log file
-if [ ! -d $LOGDIR ]; then
-    mkdir $LOGDIR
-fi
-func_lg
-
-#info directory: place control related file
-if [ ! -d $INFOPATH ]; then
-    su -c "mkdir $INFOPATH" $USER
-fi
-
-#agentServer
-func_start agentServer &
-wait
-#collector
-func_start collector &
-wait
-#adapter
-func_start adapter &
-wait
-#openvpn
-func_start openvpn &
-wait
-
-#init conf
-if [ ! -d $MONITORCONF ]; then
-    su -c "mkdir $MONITORCONF" $USER
-fi
-echo "210" > $MONITORCONF/not.conf #2*3*5*7
-
-#make fifo, offer permission to user
-if [ -e $FIFO ]; then
-    rm $FIFO
-fi
-su -c "mkfifo $FIFO" $USER
-
-#monitor running state
-func_monitor &
-SUBPID=$!
-
-#listen cmd
-sleep 1
-while true; do
-    sleep 1
-    cmd=$(cat $FIFO)
-    confmask=`cat $MONITORCONF/not.conf`
-#    echo "command received: $cmd" >> $LOGFILE
-    if [ "ibstart" == $cmd ]; then
-        func_start collector
-        if [ 0 -ne `expr $confmask % $SIGCO` ]; then #add this mask 2
-            echo `expr $confmask \* 2` > $MONITORCONF/not.conf
-        fi
-    elif [ "agstart" == $cmd ]; then
-        func_start agentServer
-        if [ 0 -ne `expr $confmask % $SIGAG` ]; then #add this mask 3
-            echo `expr 3 \* $confmask` > $MONITORCONF/not.conf
-        fi
-    elif [ "ibstop" == $cmd ]; then
-        func_stop collector
-        if [ 0 -eq `expr $confmask % $SIGCO` ]; then #remove this mask 2
-            echo `expr $confmask / 2` > $MONITORCONF/not.conf
-        fi
-    elif [ "agstop" == $cmd ]; then
-        func_stop agentServer
-        if [ 0 -eq `expr $confmask % $SIGAG` ]; then #remove this mask 3
-            echo `expr $confmask / 3` > $MONITORCONF/not.conf
-        fi
-#---
-    elif [ "adstart" == $cmd ]; then
-        func_start adapter
-        if [ 0 -ne `expr $confmask % $SIGAD` ]; then #add this mask 5
-            echo `expr $confmask \* 5` > $MONITORCONF/not.conf
-        fi
-    elif [ "ovstart" == $cmd ]; then
-        func_start openvpn
-        if [ 0 -ne `expr $confmask % $SIGOV` ]; then #add this mask 7
-            echo `expr 7 \* $confmask` > $MONITORCONF/not.conf
-        fi
-    elif [ "adstop" == $cmd ]; then
-        func_stop adapter
-        if [ 0 -eq `expr $confmask % $SIGAD` ]; then #remove this mask 5
-            echo `expr $confmask / 5` > $MONITORCONF/not.conf
-        fi
-    elif [ "ovstop" == $cmd ]; then
-        func_stop openvpn
-        if [ 0 -eq `expr $confmask % $SIGOV` ]; then #remove this mask 7
-            echo `expr $confmask / 7` > $MONITORCONF/not.conf
-        fi
-    else
-        func_err
+main()
+{
+    rm $LOGDIR/DM*.log
+    #log file
+    if [ ! -d $LOGDIR ]; then
+        mkdir $LOGDIR
     fi
-    kill -USR1 $SUBPID 
-done
+    func_lg
+    func_checkStrategy
+
+    #creat tp folder
+    if [ ! -d $INFOPATH ]; then
+        su -c "mkdir $INFOPATH" $USER
+    fi
+    #create tp/dmconf folder
+    if [ ! -d $MONITORCONF ]; then
+        su -c "mkdir $MONITORCONF" $USER
+    fi
+
+    #creat cmd.fifo
+    if [ -e $FIFO ]; then
+        rm $FIFO
+    fi
+    su -c "mkfifo $FIFO" $USER
+
+    case $APPTYPE in
+        base)
+            echo "21" > $MONITORCONF/not.conf #  3*  7
+            #agentServer
+            func_start agentServer &
+            wait
+            #openvpn
+            func_start openvpn &
+            wait
+            ;;
+        adaptive)
+            echo "210" > $MONITORCONF/not.conf #2*3*5*7
+            #agentServer
+            func_start agentServer &
+            wait
+            #collector
+            func_start collector &
+            wait
+            #adapter
+            func_start adapter &
+            wait
+            #openvpn
+            func_start openvpn &
+            wait
+            ;;
+        *)
+            echo "unkonwn appType: "$APPTYPE >> $LOGFILE
+            return 0
+    esac
+
+    #monitor running state
+    func_monitor &
+    SUBPID=$!
+
+    #listen cmd
+    sleep 1
+    while true; do
+        sleep 1
+        cmd=$(cat $FIFO)
+        confmask=`cat $MONITORCONF/not.conf`
+    #    echo "command received: $cmd" >> $LOGFILE
+        if [ "ibstart" == $cmd ]; then
+            func_start collector
+            if [ 0 -ne `expr $confmask % $SIGCO` ]; then #add this mask 2
+                echo `expr $confmask \* 2` > $MONITORCONF/not.conf
+            fi
+        elif [ "agstart" == $cmd ]; then
+            func_start agentServer
+            if [ 0 -ne `expr $confmask % $SIGAG` ]; then #add this mask 3
+                echo `expr 3 \* $confmask` > $MONITORCONF/not.conf
+            fi
+        elif [ "ibstop" == $cmd ]; then
+            func_stop collector
+            if [ 0 -eq `expr $confmask % $SIGCO` ]; then #remove this mask 2
+                echo `expr $confmask / 2` > $MONITORCONF/not.conf
+            fi
+        elif [ "agstop" == $cmd ]; then
+            func_stop agentServer
+            if [ 0 -eq `expr $confmask % $SIGAG` ]; then #remove this mask 3
+                echo `expr $confmask / 3` > $MONITORCONF/not.conf
+            fi
+    #---
+        elif [ "adstart" == $cmd ]; then
+            func_start adapter
+            if [ 0 -ne `expr $confmask % $SIGAD` ]; then #add this mask 5
+                echo `expr $confmask \* 5` > $MONITORCONF/not.conf
+            fi
+        elif [ "ovstart" == $cmd ]; then
+            func_start openvpn
+            if [ 0 -ne `expr $confmask % $SIGOV` ]; then #add this mask 7
+                echo `expr 7 \* $confmask` > $MONITORCONF/not.conf
+            fi
+        elif [ "adstop" == $cmd ]; then
+            func_stop adapter
+            if [ 0 -eq `expr $confmask % $SIGAD` ]; then #remove this mask 5
+                echo `expr $confmask / 5` > $MONITORCONF/not.conf
+            fi
+        elif [ "ovstop" == $cmd ]; then
+            func_stop openvpn
+            if [ 0 -eq `expr $confmask % $SIGOV` ]; then #remove this mask 7
+                echo `expr $confmask / 7` > $MONITORCONF/not.conf
+            fi
+        else
+            func_err
+        fi
+        kill -USR1 $SUBPID
+    done
+}
+
+main
 
 #EOF
