@@ -1,6 +1,11 @@
 #!/bin/bash
 #do not execute manually, refer to readme.Md
 
+if [ `ps -ef | grep daemon.sh | grep -v grep | wc -l` -eq 0 ]; then # not running
+    echo -e "\033[0;31mdaemon is not running!!!\033[0m"
+    exit 1
+fi
+
 if [ $# != 1 ]; then
     echo "please refer to README.md"
     echo "usage:"
